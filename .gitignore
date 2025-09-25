@@ -43,3 +43,6 @@ build/
 .idea/
 .DS_Store
 Thumbs.db
+
+raw_reddit_data/
+raw_twitter_data/
