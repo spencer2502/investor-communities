@@ -1,0 +1,45 @@
+# ==========================
+# Python Backend
+# ==========================
+# Virtual environments
+venv/
+.env/
+.venv/
+ENV/
+env/
+
+# Compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Test & coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Flask/Django instance folders
+instance/
+.webassets-cache
+
+# ==========================
+# Node.js / Frontend
+# ==========================
+node_modules/
+dist/
+build/
+
+# ==========================
+# Environment Files
+# ==========================
+.env
+.env.*        # .env.local, .env.production, etc. (but keep an .env.example)
+
+# ==========================
+# IDE / System
+# ==========================
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

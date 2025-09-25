@@ -1,0 +1,14 @@
+pandas
+numpy
+networkx
+python-louvain
+plotly
+pyvis
+streamlit
+tweepy
+praw
+scikit-learn
+nltk
+python-dotenv
+wordcloud
+matplotlib
