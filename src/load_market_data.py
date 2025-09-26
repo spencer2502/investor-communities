@@ -6,77 +6,108 @@ from datetime import datetime
 # Define the output path for the processed JSON data
 OUTFILE = "data/raw_market_data.json"
 
-# Define the input path for your CSV file. 
-# ASSUMPTION: The CSV is named 'CompanyValues.csv' and is in the project root.
-# !! IMPORTANT: CHANGE THIS FILENAME if yours is different !!
-MARKET_FILE = "CompanyValues.csv" 
-
-# Define the column mapping from your CSV names to the desired names
-COLUMN_MAPPING = {
-    'ticker_symbol': 'Ticker',      # Maps to the 'Stock Name' concept
-    'day_date': 'Date',             # The trading date
-    'close_value': 'Close',         # Closing price
-    'volume': 'Volume',             # Trading volume
-    'open_value': 'Open',           # Opening price
-    'high_value': 'High',           # Daily high price
-    'low_value': 'Low'              # Daily low price
-    # NOTE: The CSV does not have 'Adj Close', so it will not be included.
+# Define the input paths for your two CSV files. 
+FILE_PATHS = {
+    "CompanyValues": "CompanyValues.csv",
+    "YFinanceData": "stock_yfinance_data.csv"
 }
 
+# --- Column Mappings for Standardization ---
+# This dictionary maps the diverse column names from both files 
+# to the desired, uniform output column names.
+COLUMN_MAPPER = {
+    # CompanyValues.csv columns (Source 1)
+    'ticker_symbol': 'Ticker',
+    'day_date': 'Date',
+    'close_value': 'Close',
+    'volume': 'Volume',
+    'open_value': 'Open',
+    'high_value': 'High',
+    'low_value': 'Low',
+    
+    # stick_yfinance_data.csv columns (Source 2 - already close to desired format)
+    'Stock Name': 'Ticker',
+    'Date': 'Date',
+    'Open': 'Open',
+    'High': 'High',
+    'Low': 'Low',
+    'Close': 'Close',
+    'Volume': 'Volume',
+    'Adj Close': 'Adj_Close', # Maps to a standardized name
+}
+
+# Define the final columns we want in the output
+FINAL_COLUMNS = ['Ticker', 'Date', 'Open', 'High', 'Low', 'Close', 'Volume', 'Adj_Close']
+
 def load_market_data():
-    """Loads market data, renames columns, and standardizes the Date field."""
+    """Loads market data from two files, merges, renames columns, and standardizes the Date field."""
     
-    # 1. Check for the input file
-    if not os.path.exists(MARKET_FILE):
-        print(f"❌ Market data file not found at {MARKET_FILE}. Please check the filename and location.")
-        return
-
-    # Ensure the 'data' output directory exists
     os.makedirs("data", exist_ok=True)
-    print(f"🔄 Loading data from {MARKET_FILE}...")
+    all_dfs = []
+    
+    # 1. Load and Process Each File Individually
+    for file_key, file_path in FILE_PATHS.items():
+        if not os.path.exists(file_path):
+            print(f"❌ Market data file not found at {file_path}. Skipping this file.")
+            continue
+            
+        print(f"🔄 Loading data from {file_path}...")
 
-    try:
-        # 2. Load the CSV file
-        df = pd.read_csv(MARKET_FILE, low_memory=False)
-    except Exception as e:
-        print(f"❌ Error reading market data file: {e}")
+        try:
+            df = pd.read_csv(file_path, low_memory=False)
+            
+            # Rename columns using the defined mapping
+            # This ensures 'ticker_symbol' becomes 'Ticker', 'day_date' becomes 'Date', etc.
+            df.columns = [COLUMN_MAPPER.get(col, col) for col in df.columns]
+            
+            # --- Specific Date Formatting Handling ---
+            if file_key == "CompanyValues":
+                # Source 1 Date: 29-05-2020 (DD-MM-YYYY)
+                df['Date'] = pd.to_datetime(df['Date'], format='%d-%m-%Y', errors='coerce')
+            else:
+                # Source 2 Date: Let Pandas infer the format (usually YYYY-MM-DD or MM-DD-YYYY)
+                df['Date'] = pd.to_datetime(df['Date'], infer_datetime_format=True, errors='coerce')
+
+            all_dfs.append(df)
+            
+        except Exception as e:
+            print(f"❌ Error reading data file {file_path}: {e}")
+            
+    # 2. Consolidate DataFrames
+    if not all_dfs:
+        print("❌ No data successfully loaded from either file. Aborting.")
         return
 
-    # 3. Rename columns using the defined mapping
-    # Note: We select only the columns we need to avoid including extras.
-    df = df.rename(columns=COLUMN_MAPPING)
-    
-    # Filter down to the exact columns needed for analysis and ensure they exist
-    required_cols = list(COLUMN_MAPPING.values())
-    if not all(col in df.columns for col in required_cols):
-         print("❌ Error: Not all required columns were found after renaming.")
-         print(f"Expected: {required_cols}. Found: {df.columns.tolist()}")
-         return
-         
-    df = df[required_cols]
+    # Merge all DataFrames into one master DataFrame
+    df_combined = pd.concat(all_dfs, ignore_index=True)
+    print(f"✅ Successfully combined {len(all_dfs)} files into one DataFrame with {len(df_combined)} records.")
 
-    # 4. Standardize the Date column
-    # Use pandas to_datetime with 'infer_datetime_format=True' for robustness
-    df['Date'] = pd.to_datetime(df['Date'], infer_datetime_format=True, errors='coerce')
+    # 3. Final Standardization and Cleanup
     
-    # Drop any rows where date conversion failed
-    df.dropna(subset=['Date', 'Ticker'], inplace=True)
+    # Select only the FINAL_COLUMNS (dropping temporary or unnecessary columns)
+    df_final = df_combined[[col for col in FINAL_COLUMNS if col in df_combined.columns]].copy()
     
-    # 5. Check and print unique tickers found
-    unique_tickers = df['Ticker'].unique()
+    # Drop any rows where Ticker or Date is missing (or failed conversion)
+    df_final.dropna(subset=['Date', 'Ticker'], inplace=True)
+    
+    # Remove duplicate rows (e.g., if one stock's data for the same day appears in both files)
+    df_final.drop_duplicates(subset=['Date', 'Ticker'], keep='last', inplace=True)
+    
+    # 4. Final Ticker Check
+    unique_tickers = df_final['Ticker'].unique()
     print("-" * 50)
-    print(f"✅ Loaded {len(df)} records for {len(unique_tickers)} unique tickers.")
+    print(f"✅ Final data: {len(df_final)} records for {len(unique_tickers)} unique tickers.")
     print("Unique Tickers Found (First 10):", unique_tickers[:10].tolist())
     print("-" * 50)
 
-    # 6. Convert to list of dictionaries for JSON output
-    # Convert date back to ISO string format before saving
-    records = df.to_dict('records')
+    # 5. Convert to list of dictionaries for JSON output
+    records = df_final.to_dict('records')
     for rec in records:
+        # Convert date back to ISO string format (YYYY-MM-DDTHH:MM:SS)
         if isinstance(rec['Date'], pd.Timestamp):
             rec['Date'] = rec['Date'].isoformat()
 
-    # 7. Save the transformed data
+    # 6. Save the transformed data
     with open(OUTFILE, "w", encoding="utf8") as f:
         json.dump(records, f, indent=2)
     
