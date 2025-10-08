@@ -57,8 +57,8 @@ BASE = Path(".")
 NODE_CSV = BASE / "data" / "communities" / "node_communities.csv"
 COMM_CSV = BASE / "data" / "communities" / "community_summary.csv"
 GEXF_P = BASE / "data" / "communities" / "ticker_network_with_communities.gexf"
-USERS_CSV = BASE / "data" / "users.csv"
-POSTS_CSV = BASE / "data" / "posts.csv"
+USERS_CSV = BASE / "data" / "processed" / "users.csv"
+POSTS_CSV = BASE / "data" / "processed" / "posts.csv"
 
 # --------------------------------------------------------------------
 # DATA LOADERS
@@ -104,7 +104,6 @@ def extract_tickers(text):
     """Extract ticker symbols from text"""
     if pd.isna(text): 
         return []
-    # Look for uppercase words 2-5 chars
     return list(set(re.findall(r"\b[A-Z]{2,5}\b", str(text))))
 
 def parse_ticker_list(ticker_str):
@@ -182,21 +181,6 @@ show_wordcloud = st.sidebar.checkbox("Show WordClouds", value=True)
 animate_growth = st.sidebar.checkbox("Enable Growth Animations", value=True)
 show_tickers = st.sidebar.checkbox("Show Ticker Analysis", value=True)
 
-# Advanced filters
-st.sidebar.markdown("---")
-st.sidebar.subheader("🔍 Advanced Filters")
-date_range_filter = st.sidebar.checkbox("Enable Date Range Filter", value=False)
-if date_range_filter and not posts_df.empty and "ts" in posts_df.columns:
-    min_date = posts_df["ts"].min()
-    max_date = posts_df["ts"].max()
-    if pd.notna(min_date) and pd.notna(max_date):
-        date_range = st.sidebar.date_input(
-            "Select Date Range",
-            value=(min_date.date(), max_date.date()),
-            min_value=min_date.date(),
-            max_value=max_date.date()
-        )
-
 # --------------------------------------------------------------------
 # HEADER SECTION
 # --------------------------------------------------------------------
@@ -243,17 +227,16 @@ if show_network:
         comm_to_color = {str(c): f"rgb{tuple(int(255*x) for x in cmap(i % 20)[:3])}" for i, c in enumerate(comms)}
         
         nodes_added = 0
-        max_nodes = 1000  # Limit for performance
+        max_nodes = 1000
+        node_ids_added = set()
         
         for n, d in G.nodes(data=True):
             if nodes_added >= max_nodes:
                 break
                 
             comm = d.get("community")
-            # Get betweenness, default to 0 if not present
             bw = float(d.get("betweenness", 0.0))
             
-            # Apply filters
             if selected_comm and selected_comm != "All" and str(comm) != str(selected_comm):
                 continue
             if bw < min_betw:
@@ -264,15 +247,11 @@ if show_network:
             title = f"<b>{n}</b><br>Community: {comm}<br>Degree: {deg:.2f}<br>Betweenness: {bw:.6f}"
             size = max(8, 8 + np.sqrt(float(deg) if deg else 1) * 2)
             net.add_node(str(n), label=str(n)[:15], title=title, color=color, size=size)
+            node_ids_added.add(str(n))
             nodes_added += 1
         
-        # Add edges for nodes that exist in the network
-        existing_ids = {n['id'] for n in net.get_nodes()} if hasattr(net, 'get_nodes') else set()
-        if not existing_ids:
-            existing_ids = set(net.node_ids) if hasattr(net, 'node_ids') else set()
-        
         for u, v, ed in G.edges(data=True):
-            if str(u) in existing_ids and str(v) in existing_ids:
+            if str(u) in node_ids_added and str(v) in node_ids_added:
                 w = float(ed.get("weight", 1))
                 net.add_edge(str(u), str(v), value=w, title=f"Weight: {w:.2f}")
         
@@ -281,20 +260,11 @@ if show_network:
           "nodes": {
             "borderWidth": 2,
             "borderWidthSelected": 4,
-            "shadow": {
-              "enabled": true,
-              "color": "rgba(0,0,0,0.5)",
-              "size": 10
-            }
+            "shadow": {"enabled": true, "color": "rgba(0,0,0,0.5)", "size": 10}
           },
           "edges": {
-            "color": {
-              "inherit": true,
-              "opacity": 0.4
-            },
-            "smooth": {
-              "type": "continuous"
-            }
+            "color": {"inherit": true, "opacity": 0.4},
+            "smooth": {"type": "continuous"}
           },
           "physics": {
             "barnesHut": {
@@ -314,28 +284,33 @@ if show_network:
           }
         }
         """)
-        return net
+        return net, nodes_added
 
     try:
-        net = build_pyvis(G, None if sel_comm == "All" else sel_comm, min_betw)
+        net, nodes_added = build_pyvis(G, None if sel_comm == "All" else sel_comm, min_betw)
         
-        # Check if network has nodes
-        if len(net.nodes) == 0:
+        if nodes_added == 0:
             st.warning("⚠️ No nodes match the current filters. Try reducing the betweenness threshold.")
-        else:
+            st.info(f"💡 **Tip:** Current betweenness filter is set to {min_betw:.4f}. Set it to 0.0 to see all nodes.")
+            
+            if min_betw > 0:
+                st.info("Showing network without betweenness filter as fallback...")
+                net, nodes_added = build_pyvis(G, None if sel_comm == "All" else sel_comm, 0.0)
+        
+        if nodes_added > 0:
             html_path = "temp_vis.html"
             net.save_graph(html_path)
             with open(html_path, "r", encoding="utf-8") as f:
                 html_content = f.read()
             st.components.v1.html(html_content, height=820, scrolling=True)
-            st.success(f"✅ Displaying {len(net.nodes)} nodes and {len(net.edges)} edges")
+            st.success(f"✅ Displaying {nodes_added} nodes with their connections")
+        else:
+            st.error("⚠️ No nodes found in the graph. Please check your data files.")
     except Exception as e:
         st.error(f"⚠️ PyVis visualization failed: {e}")
         st.info("Switching to Plotly static visualization...")
         
-        # Fallback to Plotly visualization
         try:
-            # Filter graph based on selection
             if sel_comm != "All":
                 nodes_to_show = [n for n, d in G.nodes(data=True) 
                                if str(d.get('community')) == str(sel_comm) and d.get('betweenness', 0) >= min_betw]
@@ -343,7 +318,6 @@ if show_network:
                 nodes_to_show = [n for n, d in G.nodes(data=True) 
                                if d.get('betweenness', 0) >= min_betw]
             
-            # Limit to reasonable number for performance
             if len(nodes_to_show) > 500:
                 st.warning(f"⚠️ Too many nodes ({len(nodes_to_show)}). Sampling 500 nodes for visualization.")
                 import random
@@ -355,9 +329,7 @@ if show_network:
                 subG = G.subgraph(nodes_to_show)
                 pos = nx.spring_layout(subG, k=0.5, iterations=50, seed=42)
                 
-                # Create edge trace
-                edge_x = []
-                edge_y = []
+                edge_x, edge_y = [], []
                 for edge in subG.edges():
                     x0, y0 = pos[edge[0]]
                     x1, y1 = pos[edge[1]]
@@ -371,12 +343,7 @@ if show_network:
                     mode='lines'
                 )
                 
-                # Create node trace
-                node_x = []
-                node_y = []
-                node_colors = []
-                node_sizes = []
-                node_text = []
+                node_x, node_y, node_colors, node_sizes, node_text = [], [], [], [], []
                 
                 for node in subG.nodes():
                     x, y = pos[node]
@@ -393,38 +360,23 @@ if show_network:
                     node_text.append(f"<b>{node}</b><br>Community: {comm}<br>Degree: {deg:.2f}<br>Betweenness: {betw:.6f}")
                 
                 node_trace = go.Scatter(
-                    x=node_x, y=node_y,
-                    mode='markers',
-                    hoverinfo='text',
-                    text=node_text,
+                    x=node_x, y=node_y, mode='markers', hoverinfo='text', text=node_text,
                     marker=dict(
-                        size=node_sizes,
-                        color=node_colors,
-                        colorscale='Viridis',
-                        showscale=True,
-                        colorbar=dict(
-                            title="Community",
-                            thickness=15,
-                            xanchor='left'
-                        ),
+                        size=node_sizes, color=node_colors, colorscale='Viridis', showscale=True,
+                        colorbar=dict(title="Community", thickness=15, xanchor='left'),
                         line=dict(width=1, color='white')
                     )
                 )
                 
-                # Create figure
                 fig = go.Figure(data=[edge_trace, node_trace])
                 fig.update_layout(
-                    title=f"Network Graph ({len(nodes_to_show)} nodes, {subG.number_of_edges()} edges)",
-                    titlefont_size=16,
-                    showlegend=False,
-                    hovermode='closest',
+                    title={'text': f"Network Graph ({len(nodes_to_show)} nodes, {subG.number_of_edges()} edges)", 'font': {'size': 16}},
+                    showlegend=False, hovermode='closest',
                     margin=dict(b=20, l=5, r=5, t=40),
                     xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
                     yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                    plot_bgcolor='#0e1117',
-                    paper_bgcolor='#0e1117',
-                    height=800,
-                    template="plotly_dark"
+                    plot_bgcolor='#0e1117', paper_bgcolor='#0e1117',
+                    height=800, template="plotly_dark"
                 )
                 
                 st.plotly_chart(fig, use_container_width=True)
@@ -441,13 +393,11 @@ if show_network:
 # --------------------------------------------------------------------
 st.header("📊 Community Analytics Dashboard")
 
-# Filter data based on selections
 filtered_comm_df = comm_df[comm_df["size"] >= min_size] if not comm_df.empty else pd.DataFrame()
 filtered_node_df = node_df[node_df["betweenness"] >= min_betw] if not node_df.empty else pd.DataFrame()
 if sel_comm != "All" and not filtered_node_df.empty:
     filtered_node_df = filtered_node_df[filtered_node_df["community"] == int(sel_comm)]
 
-# Two column layout
 col_left, col_right = st.columns([1.2, 1])
 
 with col_left:
@@ -455,11 +405,9 @@ with col_left:
     if not filtered_comm_df.empty:
         fig_bar = px.bar(
             filtered_comm_df.sort_values("size", ascending=False).head(20),
-            x="community", y="size",
-            color="avg_weighted_degree",
+            x="community", y="size", color="avg_weighted_degree",
             hover_data=["avg_weighted_degree", "avg_betweenness", "density"],
-            title="Top 20 Communities by Size",
-            color_continuous_scale="viridis",
+            title="Top 20 Communities by Size", color_continuous_scale="viridis",
             labels={"avg_weighted_degree": "Avg Degree"}
         )
         fig_bar.update_layout(height=450, template="plotly_dark")
@@ -472,14 +420,12 @@ with col_right:
     if not filtered_comm_df.empty:
         fig_metrics = go.Figure()
         fig_metrics.add_trace(go.Scatter(
-            x=filtered_comm_df["avg_weighted_degree"],
-            y=filtered_comm_df["density"],
+            x=filtered_comm_df["avg_weighted_degree"], y=filtered_comm_df["density"],
             mode="markers",
             marker=dict(
                 size=filtered_comm_df["size"] / 2,
                 color=filtered_comm_df["avg_betweenness"],
-                colorscale="Plasma",
-                showscale=True,
+                colorscale="Plasma", showscale=True,
                 colorbar=dict(title="Avg Betweenness")
             ),
             text=filtered_comm_df["community"],
@@ -487,14 +433,11 @@ with col_right:
         ))
         fig_metrics.update_layout(
             title="Community Connectivity vs Density",
-            xaxis_title="Average Weighted Degree",
-            yaxis_title="Density",
-            height=450,
-            template="plotly_dark"
+            xaxis_title="Average Weighted Degree", yaxis_title="Density",
+            height=450, template="plotly_dark"
         )
         st.plotly_chart(fig_metrics, use_container_width=True)
 
-# Scatter plot: betweenness vs degree
 if not filtered_node_df.empty:
     st.subheader("🔗 Node Influence Analysis")
     sample_size = min(len(filtered_node_df), 3000)
@@ -503,13 +446,10 @@ if not filtered_node_df.empty:
     hover_col = user_id_col if user_id_col and user_id_col in sample_df.columns else None
     
     fig_scatter = px.scatter(
-        sample_df,
-        x="weighted_degree", y="betweenness",
-        color="community",
+        sample_df, x="weighted_degree", y="betweenness", color="community",
         hover_name=hover_col,
         title=f"Betweenness Centrality vs Weighted Degree (n={sample_size})",
-        template="plotly_dark",
-        color_continuous_scale="Turbo"
+        template="plotly_dark", color_continuous_scale="Turbo"
     )
     fig_scatter.update_traces(marker=dict(line=dict(width=0.5, color='white')))
     st.plotly_chart(fig_scatter, use_container_width=True)
@@ -517,7 +457,7 @@ if not filtered_node_df.empty:
 st.markdown("---")
 
 # --------------------------------------------------------------------
-# TICKER ANALYSIS FROM USERS
+# TICKER ANALYSIS
 # --------------------------------------------------------------------
 if show_tickers:
     st.header("📈 Ticker Analysis by Community")
