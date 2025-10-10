@@ -1034,7 +1034,7 @@ with insights_col2:
 st.markdown("---")
 st.markdown("""
 <div style="text-align: center; padding: 2rem; background: rgba(255,255,255,0.05); border-radius: 10px;">
-    <h3>💡 Built with ❤️ for Investor Community Analysis</h3>
+
     <p style="opacity: 0.8;">
         Powered by Streamlit • Plotly • NetworkX • PyVis • WordCloud
     </p>

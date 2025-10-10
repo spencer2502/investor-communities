@@ -1,0 +1,12 @@
+Investor Communities is a data science project that collects, processes, and analyzes social media and market data to understand online investor communities, their sentiment, and their network structure. It integrates Reddit, Twitter, and market data, builds user-ticker graphs, and profiles communities using advanced analytics and visualization tools.
+
+Key features:
+- Collects Reddit and Twitter data with rich metadata
+- Cleans and standardizes text, dates, and user information
+- Extracts tickers and builds unified datasets
+- Constructs user co-mention graphs
+- Detects and profiles communities
+- Computes sentiment and tracks trends
+- Provides visualization and dashboard tools
+
+The project is modular and supports flexible workflows for research and analysis in finance, social network analysis, and community detection.
